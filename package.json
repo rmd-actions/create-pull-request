@@ -1,9 +1,12 @@
 {
   "name": "create-pull-request",
-  "version": "7.0.0",
+  "version": "8.0.0",
   "private": true,
   "description": "Creates a pull request for changes to your repository in the actions workspace",
   "main": "lib/main.js",
+  "engines": {
+    "node": ">=24.4.0"
+  },
   "scripts": {
     "build": "tsc && ncc build",
     "format": "prettier --write '**/*.ts'",
@@ -55,7 +58,7 @@
     "jest-circus": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
     "js-yaml": "^4.1.1",
-    "prettier": "^3.6.2",
+    "prettier": "^3.7.3",
     "ts-jest": "^29.4.5",
     "typescript": "^5.9.3",
     "undici": "^6.22.0"
