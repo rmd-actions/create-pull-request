@@ -452,12 +452,14 @@ function createPullRequest(inputs) {
             if (branchRemoteName == 'origin' && base == inputs.branch) {
                 throw new Error(`The 'base' and 'branch' for a pull request must be different branches. Unable to continue.`);
             }
-            // For self-hosted runners the repository state persists between runs.
-            // This command prunes the stale remote ref when the pull request branch was
-            // deleted after being merged or closed. Without this the push using
-            // '--force-with-lease' fails due to "stale info."
-            // https://github.com/peter-evans/create-pull-request/issues/633
-            yield git.exec(['remote', 'prune', branchRemoteName]);
+            if (utils.isSelfHosted()) {
+                // For self-hosted runners the repository state persists between runs.
+                // This command prunes the stale remote ref when the pull request branch was
+                // deleted after being merged or closed. Without this the push using
+                // '--force-with-lease' fails due to "stale info."
+                // https://github.com/peter-evans/create-pull-request/issues/633
+                yield git.exec(['remote', 'prune', branchRemoteName]);
+            }
             core.endGroup();
             // Apply the branch suffix if set
             if (inputs.branchSuffix) {
@@ -1355,6 +1357,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __asyncValues = (this && this.__asyncValues) || function (o) {
+    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+    var m = o[Symbol.asyncIterator], i;
+    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
+    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
+    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -1390,6 +1399,43 @@ class GitHubHelper {
             repo: repo
         };
     }
+    getPullNumber(baseRepository, headBranch, baseBranch) {
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a, e_1, _b, _c;
+            const { data: pulls } = yield this.octokit.rest.pulls.list(Object.assign(Object.assign({}, this.parseRepository(baseRepository)), { state: 'open', head: headBranch, base: baseBranch }));
+            let pullNumber = undefined;
+            if ((pulls === null || pulls === void 0 ? void 0 : pulls.length) === 0 || pulls === null || pulls === undefined) {
+                // This is a fallback due to a bug that affects the list endpoint when called on forks with the same owner as the repository parent.
+                core.info(`Pull request not found via list endpoint; attempting fallback mechanism`);
+                try {
+                    for (var _d = true, _e = __asyncValues(this.octokit.paginate.iterator(this.octokit.rest.pulls.list, Object.assign(Object.assign({}, this.parseRepository(baseRepository)), { state: 'open', base: baseBranch }))), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
+                        _c = _f.value;
+                        _d = false;
+                        const response = _c;
+                        const existingPull = response.data.find(pull => pull.head.label === headBranch);
+                        if (existingPull !== undefined) {
+                            pullNumber = existingPull.number;
+                            break;
+                        }
+                    }
+                }
+                catch (e_1_1) { e_1 = { error: e_1_1 }; }
+                finally {
+                    try {
+                        if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
+                    }
+                    finally { if (e_1) throw e_1.error; }
+                }
+            }
+            else {
+                pullNumber = pulls[0].number;
+            }
+            if (pullNumber === undefined) {
+                throw new Error(`Failed to find pull request number for branch ${headBranch}`);
+            }
+            return pullNumber;
+        });
+    }
     createOrUpdate(inputs, baseRepository, headRepository) {
         return __awaiter(this, void 0, void 0, function* () {
             const [headOwner] = headRepository.split('/');
@@ -1423,9 +1469,9 @@ class GitHubHelper {
             }
             // Update the pull request that exists for this branch and base
             core.info(`Fetching existing pull request`);
-            const { data: pulls } = yield this.octokit.rest.pulls.list(Object.assign(Object.assign({}, this.parseRepository(baseRepository)), { state: 'open', head: headBranch, base: inputs.base }));
+            const pullNumber = yield this.getPullNumber(baseRepository, headBranch, inputs.base);
             core.info(`Attempting update of pull request`);
-            const { data: pull } = yield this.octokit.rest.pulls.update(Object.assign(Object.assign({}, this.parseRepository(baseRepository)), { pull_number: pulls[0].number, title: inputs.title, body: inputs.body }));
+            const { data: pull } = yield this.octokit.rest.pulls.update(Object.assign(Object.assign({}, this.parseRepository(baseRepository)), { pull_number: pullNumber, title: inputs.title, body: inputs.body }));
             core.info(`Updated pull request #${pull.number} (${headBranch} => ${inputs.base})`);
             return {
                 number: pull.number,
@@ -1844,6 +1890,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.isSelfHosted = void 0;
 exports.getInputAsArray = getInputAsArray;
 exports.getStringAsArray = getStringAsArray;
 exports.stripOrgPrefixFromTeams = stripOrgPrefixFromTeams;
@@ -1952,6 +1999,10 @@ function getErrorMessage(error) {
         return error.message;
     return String(error);
 }
+const isSelfHosted = () => process.env['RUNNER_ENVIRONMENT'] !== 'github-hosted' &&
+    (process.env['AGENT_ISSELFHOSTED'] === '1' ||
+        process.env['AGENT_ISSELFHOSTED'] === undefined);
+exports.isSelfHosted = isSelfHosted;
 
 
 /***/ }),
@@ -4460,7 +4511,7 @@ class HttpClient {
         }
         const usingSsl = parsedUrl.protocol === 'https:';
         proxyAgent = new undici_1.ProxyAgent(Object.assign({ uri: proxyUrl.href, pipelining: !this._keepAlive ? 0 : 1 }, ((proxyUrl.username || proxyUrl.password) && {
-            token: `${proxyUrl.username}:${proxyUrl.password}`
+            token: `Basic ${Buffer.from(`${proxyUrl.username}:${proxyUrl.password}`).toString('base64')}`
         })));
         this._proxyAgentDispatcher = proxyAgent;
         if (usingSsl && this._ignoreSslError) {
@@ -4574,11 +4625,11 @@ function getProxyUrl(reqUrl) {
     })();
     if (proxyVar) {
         try {
-            return new URL(proxyVar);
+            return new DecodedURL(proxyVar);
         }
         catch (_a) {
             if (!proxyVar.startsWith('http://') && !proxyVar.startsWith('https://'))
-                return new URL(`http://${proxyVar}`);
+                return new DecodedURL(`http://${proxyVar}`);
         }
     }
     else {
@@ -4636,6 +4687,19 @@ function isLoopbackAddress(host) {
         hostLower.startsWith('127.') ||
         hostLower.startsWith('[::1]') ||
         hostLower.startsWith('[0:0:0:0:0:0:0:1]'));
+}
+class DecodedURL extends URL {
+    constructor(url, base) {
+        super(url, base);
+        this._decodedUsername = decodeURIComponent(super.username);
+        this._decodedPassword = decodeURIComponent(super.password);
+    }
+    get username() {
+        return this._decodedUsername;
+    }
+    get password() {
+        return this._decodedPassword;
+    }
 }
 //# sourceMappingURL=proxy.js.map
 
@@ -9969,7 +10033,7 @@ module.exports = {
 
 
 const { parseSetCookie } = __nccwpck_require__(7803)
-const { stringify, getHeadersList } = __nccwpck_require__(6338)
+const { stringify } = __nccwpck_require__(6338)
 const { webidl } = __nccwpck_require__(8134)
 const { Headers } = __nccwpck_require__(9061)
 
@@ -10045,14 +10109,13 @@ function getSetCookies (headers) {
 
   webidl.brandCheck(headers, Headers, { strict: false })
 
-  const cookies = getHeadersList(headers).cookies
+  const cookies = headers.getSetCookie()
 
   if (!cookies) {
     return []
   }
 
-  // In older versions of undici, cookies is a list of name:value.
-  return cookies.map((pair) => parseSetCookie(Array.isArray(pair) ? pair[1] : pair))
+  return cookies.map((pair) => parseSetCookie(pair))
 }
 
 /**
@@ -10480,14 +10543,15 @@ module.exports = {
 /***/ }),
 
 /***/ 6338:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+/***/ ((module) => {
 
 "use strict";
 
 
-const assert = __nccwpck_require__(2613)
-const { kHeadersList } = __nccwpck_require__(9411)
-
+/**
+ * @param {string} value
+ * @returns {boolean}
+ */
 function isCTLExcludingHtab (value) {
   if (value.length === 0) {
     return false
@@ -10748,31 +10812,13 @@ function stringify (cookie) {
   return out.join('; ')
 }
 
-let kHeadersListNode
-
-function getHeadersList (headers) {
-  if (headers[kHeadersList]) {
-    return headers[kHeadersList]
-  }
-
-  if (!kHeadersListNode) {
-    kHeadersListNode = Object.getOwnPropertySymbols(headers).find(
-      (symbol) => symbol.description === 'headers list'
-    )
-
-    assert(kHeadersListNode, 'Headers cannot be parsed')
-  }
-
-  const headersList = headers[kHeadersListNode]
-  assert(headersList)
-
-  return headersList
-}
-
 module.exports = {
   isCTLExcludingHtab,
-  stringify,
-  getHeadersList
+  validateCookieName,
+  validateCookiePath,
+  validateCookieValue,
+  toIMFDate,
+  stringify
 }
 
 
@@ -12701,6 +12747,14 @@ const { isUint8Array, isArrayBuffer } = __nccwpck_require__(8253)
 const { File: UndiciFile } = __nccwpck_require__(3305)
 const { parseMIMEType, serializeAMimeType } = __nccwpck_require__(4346)
 
+let random
+try {
+  const crypto = __nccwpck_require__(7598)
+  random = (max) => crypto.randomInt(0, max)
+} catch {
+  random = (max) => Math.floor(Math.random(max))
+}
+
 let ReadableStream = globalThis.ReadableStream
 
 /** @type {globalThis['File']} */
@@ -12786,7 +12840,7 @@ function extractBody (object, keepalive = false) {
     // Set source to a copy of the bytes held by object.
     source = new Uint8Array(object.buffer.slice(object.byteOffset, object.byteOffset + object.byteLength))
   } else if (util.isFormDataLike(object)) {
-    const boundary = `----formdata-undici-0${`${Math.floor(Math.random() * 1e11)}`.padStart(11, '0')}`
+    const boundary = `----formdata-undici-0${`${random(1e11)}`.padStart(11, '0')}`
     const prefix = `--${boundary}\r\nContent-Disposition: form-data`
 
     /*! formdata-polyfill. MIT License. Jimmy Wärting <https://jimmy.warting.se/opensource> */
@@ -14768,6 +14822,7 @@ const {
   isValidHeaderName,
   isValidHeaderValue
 } = __nccwpck_require__(555)
+const util = __nccwpck_require__(9023)
 const { webidl } = __nccwpck_require__(8134)
 const assert = __nccwpck_require__(2613)
 
@@ -15321,6 +15376,9 @@ Object.defineProperties(Headers.prototype, {
   [Symbol.toStringTag]: {
     value: 'Headers',
     configurable: true
+  },
+  [util.inspect.custom]: {
+    enumerable: false
   }
 })
 
@@ -24497,6 +24555,20 @@ class Pool extends PoolBase {
       ? { ...options.interceptors }
       : undefined
     this[kFactory] = factory
+
+    this.on('connectionError', (origin, targets, error) => {
+      // If a connection error occurs, we remove the client from the pool,
+      // and emit a connectionError event. They will not be re-used.
+      // Fixes https://github.com/nodejs/undici/issues/3895
+      for (const target of targets) {
+        // Do not use kRemoveClient here, as it will close the client,
+        // but the client cannot be closed in this state.
+        const idx = this[kClients].indexOf(target)
+        if (idx !== -1) {
+          this[kClients].splice(idx, 1)
+        }
+      }
+    })
   }
 
   [kGetDispatcher] () {
