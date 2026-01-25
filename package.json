@@ -1,9 +1,12 @@
 {
   "name": "create-pull-request",
-  "version": "7.0.0",
+  "version": "8.0.0",
   "private": true,
   "description": "Creates a pull request for changes to your repository in the actions workspace",
   "main": "lib/main.js",
+  "engines": {
+    "node": ">=24.4.0"
+  },
   "scripts": {
     "build": "tsc && ncc build",
     "format": "prettier --write '**/*.ts'",
@@ -34,6 +37,7 @@
     "@octokit/core": "^6.1.6",
     "@octokit/plugin-paginate-rest": "^11.6.0",
     "@octokit/plugin-rest-endpoint-methods": "^13.5.0",
+    "@octokit/plugin-retry": "^7.2.1",
     "@octokit/plugin-throttling": "^9.6.1",
     "node-fetch-native": "^1.6.7",
     "p-limit": "^6.2.0",
@@ -55,9 +59,9 @@
     "jest-circus": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
     "js-yaml": "^4.1.1",
-    "prettier": "^3.7.3",
-    "ts-jest": "^29.4.5",
+    "prettier": "^3.7.4",
+    "ts-jest": "^29.4.6",
     "typescript": "^5.9.3",
-    "undici": "^6.22.0"
+    "undici": "^6.23.0"
   }
 }
