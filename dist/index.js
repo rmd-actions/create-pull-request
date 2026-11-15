@@ -1576,11 +1576,12 @@ class GitHubHelper {
                 const treeObjects = yield Promise.all(commit.changes.map((_a) => __awaiter(this, [_a], void 0, function* ({ path, mode, status, dstSha }) {
                     if (mode === '160000') {
                         // submodule
-                        core.info(`Creating tree object for submodule commit at '${path}'`);
+                        core.info(`Creating tree object for submodule commit at '${path}' with status '${status}'`);
                         return {
                             path,
                             mode,
-                            sha: dstSha,
+                            // A deleted submodule has a null dstSha; a null sha deletes the entry
+                            sha: status === 'D' ? null : dstSha,
                             type: 'commit'
                         };
                     }
@@ -1643,8 +1644,10 @@ class GitHubHelper {
     createOrUpdateRef(branchRepository, branch, newHead) {
         return __awaiter(this, void 0, void 0, function* () {
             const repository = this.parseRepository(branchRepository);
-            const branchExists = yield this.octokit.rest.repos
-                .getBranch(Object.assign(Object.assign({}, repository), { branch: branch }))
+            // Check the git ref directly rather than using the branches API, which
+            // follows branch rename redirects and can return a different branch.
+            const branchExists = yield this.octokit.rest.git
+                .getRef(Object.assign(Object.assign({}, repository), { ref: `heads/${branch}` }))
                 .then(() => true, () => false);
             if (branchExists) {
                 core.info(`Branch ${branch} exists; Updating ref`);
